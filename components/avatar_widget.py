@@ -3,7 +3,6 @@ import base64
 import os
 
 def image_to_base64(image_path: str) -> str:
-    """Mengubah gambar lokal menjadi Base64 agar terbaca mulus di HTML Streamlit."""
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode("utf-8")
@@ -102,61 +101,82 @@ def render_interactive_avatar(image_path: str, audio_path: str = None):
             <img id="avatar-img" class="avatar-img" src="{img_src}" alt="RoboMANTAP Avatar" />
         </div>
 
-        <button class="mic-button" id="mic-btn" onclick="startListening()">
+        <button class="mic-button" id="mic-btn" onclick="toggleListening()">
             🎙️ Bicara dengan RoboMANTAP
         </button>
 
         <script>
-            // 1. Injeksi Izin Mikrofon ke Iframe Streamlit Cloud
-            try {{
-                window.parent.document.querySelectorAll('iframe').forEach(iframe => {{
-                    iframe.setAttribute('allow', 'microphone');
-                }});
-            }} catch (e) {{
-                console.log("Setting iframe permission:", e);
-            }}
+            let mediaRecorder = null;
+            let audioChunks = [];
+            let isRecording = false;
+            let autoStopTimer = null;
 
-            function startListening() {{
+            async function toggleListening() {{
                 const btn = document.getElementById('mic-btn');
                 const avatar = document.getElementById('avatar-img');
 
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if (!SpeechRecognition) {{
-                    alert("Browser tidak mendukung Speech Recognition. Gunakan Google Chrome atau Edge.");
-                    return;
-                }}
-
-                const recognition = new SpeechRecognition();
-                recognition.lang = 'id-ID';
-
-                recognition.onstart = () => {{
-                    btn.innerText = "🎧 Mendengarkan... (Silakan Bicara)";
-                    avatar.classList.add('listening');
-                }};
-
-                recognition.onresult = (event) => {{
-                    const transcript = event.results[0][0].transcript;
-                    btn.innerText = "⏳ Memproses jawaban...";
-                    avatar.classList.remove('listening');
-
-                    // 2. Kirim Data Teks Suara ke Parent URL Tanpa Memicu Security Exception
+                if (!isRecording) {{
                     try {{
-                        const parentUrl = new URL(window.parent.location.href);
-                        parentUrl.searchParams.set("speech_text", transcript);
-                        window.parent.location.href = parentUrl.href;
+                        const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                        
+                        let mimeType = 'audio/webm';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) {{
+                            mimeType = 'audio/mp4';
+                        }}
+
+                        mediaRecorder = new MediaRecorder(stream, {{ mimeType: mimeType }});
+                        audioChunks = [];
+
+                        mediaRecorder.ondataavailable = (event) => {{
+                            if (event.data.size > 0) audioChunks.push(event.data);
+                        }};
+
+                        mediaRecorder.onstop = () => {{
+                            avatar.classList.remove('listening');
+                            btn.innerText = "⏳ Memproses jawaban...";
+
+                            const audioBlob = new Blob(audioChunks, {{ type: mimeType }});
+                            const reader = new FileReader();
+                            reader.readAsDataURL(audioBlob);
+                            reader.onloadend = () => {{
+                                const base64Audio = reader.result.split(',')[1];
+                                try {{
+                                    const parentUrl = new URL(window.parent.location.href);
+                                    parentUrl.searchParams.set("audio_b64", base64Audio);
+                                    window.parent.location.href = parentUrl.href;
+                                }} catch (err) {{
+                                    window.location.search = "?audio_b64=" + encodeURIComponent(base64Audio);
+                                }}
+                            }};
+                        }};
+
+                        mediaRecorder.start();
+                        isRecording = true;
+                        btn.innerText = "🔴 Mendengarkan... (Klik Lagi jika Selesai)";
+                        avatar.classList.add('listening');
+
+                        // Otomatis stop setelah 7 detik
+                        autoStopTimer = setTimeout(() => {{
+                            if (isRecording) {{
+                                stopRecording();
+                            }}
+                        }}, 7000);
+
                     }} catch (err) {{
-                        // Fallback jika dibatasi iframe
-                        window.location.search = "?speech_text=" + encodeURIComponent(transcript);
+                        alert("Gagal mengakses mikrofon: " + err.message + "\\nPastikan Anda memberikan izin mikrofon di browser.");
                     }}
-                }};
+                }} else {{
+                    stopRecording();
+                }}
+            }}
 
-                recognition.onerror = (e) => {{
-                    avatar.classList.remove('listening');
-                    btn.innerText = "🎙️ Bicara dengan RoboMANTAP";
-                    console.error("Speech Recognition Error:", e);
-                }};
-
-                recognition.start();
+            function stopRecording() {{
+                if (autoStopTimer) clearTimeout(autoStopTimer);
+                if (mediaRecorder && mediaRecorder.state !== "inactive") {{
+                    mediaRecorder.stop();
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }}
+                isRecording = false;
             }}
 
             {audio_trigger_script}
