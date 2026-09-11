@@ -1,13 +1,13 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
+
 from google import genai
 from google.genai import types
 
 from services.tts_service import text_to_speech
 from components.avatar_widget import render_interactive_avatar
 
-load_dotenv()
+
 
 # ------------------------------------------------------------------------------
 # 1. KONFIGURASI HALAMAN & MODEL
