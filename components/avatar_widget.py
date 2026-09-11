@@ -3,6 +3,7 @@ import base64
 import os
 
 def image_to_base64(image_path: str) -> str:
+    """Mengubah gambar lokal menjadi Base64 agar terbaca mulus di HTML Streamlit."""
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode("utf-8")
@@ -19,10 +20,10 @@ def render_interactive_avatar(image_path: str, audio_path: str = None):
             const avatar = document.getElementById('avatar-img');
             const btn = document.getElementById('mic-btn');
             
-            btn.innerText = "🗣️ RoboMANTAP Sedang Menjawab...";
+            btn.innerText = "🗣️ RoboMANTAP Membalas...";
             avatar.classList.add('speaking');
             
-            audio.play();
+            audio.play().catch(e => console.log("Audio play error:", e));
             audio.onended = () => {{
                 avatar.classList.remove('speaking');
                 btn.innerText = "🎙️ Bicara dengan RoboMANTAP";
@@ -106,13 +107,22 @@ def render_interactive_avatar(image_path: str, audio_path: str = None):
         </button>
 
         <script>
+            // 1. Injeksi Izin Mikrofon ke Iframe Streamlit Cloud
+            try {{
+                window.parent.document.querySelectorAll('iframe').forEach(iframe => {{
+                    iframe.setAttribute('allow', 'microphone');
+                }});
+            }} catch (e) {{
+                console.log("Setting iframe permission:", e);
+            }}
+
             function startListening() {{
                 const btn = document.getElementById('mic-btn');
                 const avatar = document.getElementById('avatar-img');
 
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 if (!SpeechRecognition) {{
-                    alert("Browser Anda tidak mendukung Speech Recognition. Gunakan Google Chrome atau Microsoft Edge.");
+                    alert("Browser tidak mendukung Speech Recognition. Gunakan Google Chrome atau Edge.");
                     return;
                 }}
 
@@ -126,22 +136,24 @@ def render_interactive_avatar(image_path: str, audio_path: str = None):
 
                 recognition.onresult = (event) => {{
                     const transcript = event.results[0][0].transcript;
-                    btn.innerText = "⏳ Mengirim data suara...";
+                    btn.innerText = "⏳ Memproses jawaban...";
                     avatar.classList.remove('listening');
 
-                    // Kirim Teks Suara Langsung ke Streamlit Backend
+                    // 2. Kirim Data Teks Suara ke Parent URL Tanpa Memicu Security Exception
                     try {{
-                        const url = new URL(window.top.location.href);
-                        url.searchParams.set("speech_text", transcript);
-                        window.top.location.href = url.href;
-                    }} catch(e) {{
-                        console.error("Gagal mengirim data suara:", e);
+                        const parentUrl = new URL(window.parent.location.href);
+                        parentUrl.searchParams.set("speech_text", transcript);
+                        window.parent.location.href = parentUrl.href;
+                    }} catch (err) {{
+                        // Fallback jika dibatasi iframe
+                        window.location.search = "?speech_text=" + encodeURIComponent(transcript);
                     }}
                 }};
 
                 recognition.onerror = (e) => {{
                     avatar.classList.remove('listening');
                     btn.innerText = "🎙️ Bicara dengan RoboMANTAP";
+                    console.error("Speech Recognition Error:", e);
                 }};
 
                 recognition.start();
