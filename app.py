@@ -1,14 +1,10 @@
 import os
-import base64
 import streamlit as st
-
 from google import genai
 from google.genai import types
 
 from services.tts_service import text_to_speech
 from components.avatar_widget import render_interactive_avatar
-
-
 
 st.set_page_config(
     page_title="RoboMANTAP — AI Assistant",
@@ -19,8 +15,8 @@ st.set_page_config(
 st.markdown("<h2 style='text-align: center; color: #047857;'>🤖 RoboMANTAP — AI Assistant</h2>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #6B7280;'>Platform Pembelajaran Pintar Al-Irsyad Al-Islamiyah</p>", unsafe_allow_html=True)
 
-# Urutan model live dengan latensi rendah
-STREAM_MODELS = ("gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+# Model Live dengan Latensi Rendah
+STREAM_MODELS = ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
 STREAM_TIMEOUT_MS = 90_000
 AUDIO_RESPONSE_PATH = "temp_response.mp3"
 CHARACTER_IMAGE = os.path.join("components", "character.png")
@@ -59,7 +55,7 @@ def _stream_config(model_name: str) -> types.GenerateContentConfig:
     system_instruction = (
         "Jawablah sebagai RoboMANTAP, asisten pembelajaran pintar Al-Irsyad "
         "yang ramah, ringkas, ceria, dan sangat mudah dipahami siswa. "
-        "Dengarkan audio pertanyaan siswa dan berikan jawaban lisan yang natural."
+        "Gunakan bahasa lisan yang natural untuk diucapkan."
     )
     try:
         return types.GenerateContentConfig(
@@ -76,17 +72,16 @@ def _stream_config(model_name: str) -> types.GenerateContentConfig:
             max_output_tokens=1000
         )
 
-def generate_response_from_audio(audio_bytes: bytes) -> str:
+def generate_response_with_rotation(prompt: str) -> str:
     clients = get_gemini_clients()
     if not clients:
-        return "Maaf, API Key Gemini belum dikonfigurasi di Secrets."
+        return f"Halo! Terima kasih sudah bertanya tentang '{prompt}'. Mari kita pelajari materi ini bersama-sama di kelas!"
 
     num_clients = len(clients)
     if "key_index" not in st.session_state:
         st.session_state.key_index = 0
 
     last_exception = None
-    audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/webm")
 
     for model_name in STREAM_MODELS:
         config = _stream_config(model_name)
@@ -98,10 +93,7 @@ def generate_response_from_audio(audio_bytes: bytes) -> str:
             try:
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=[
-                        audio_part,
-                        "Dengarkan pertanyaan pada audio ini dan jawablah dengan singkat, ramah, dan edukatif."
-                    ],
+                    contents=prompt,
                     config=config,
                 )
                 
@@ -117,21 +109,19 @@ def generate_response_from_audio(audio_bytes: bytes) -> str:
 if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 
-# Tangkap Data Rekaman Suara Base64 dari Query Parameter
-audio_b64 = st.query_params.get("audio_b64", "")
+# Tangkap Input Suara dari Query Parameter
+voice_input = st.query_params.get("speech_text", "")
 
-if audio_b64:
+if voice_input:
     st.query_params.clear()
     
-    with st.spinner("🤖 RoboMANTAP mendengarkan & menyusun jawaban..."):
-        try:
-            audio_bytes = base64.b64decode(audio_b64)
-            ai_reply = generate_response_from_audio(audio_bytes)
-        except Exception as e:
-            ai_reply = f"Gagal membaca audio: {str(e)}"
-
+    with st.spinner("🤖 RoboMANTAP sedang menjawab..."):
+        ai_reply = generate_response_with_rotation(voice_input)
         text_to_speech(ai_reply, output_file=AUDIO_RESPONSE_PATH)
         st.session_state.last_audio = AUDIO_RESPONSE_PATH
         st.rerun()
 
 render_interactive_avatar(CHARACTER_IMAGE, audio_path=st.session_state.last_audio)
+
+if voice_input:
+    st.success(f"🗣️ **Siswa:** {voice_input}")
